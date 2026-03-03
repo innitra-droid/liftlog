@@ -193,10 +193,13 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
 <div id="mainView" class="view active">
   <div class="app-header">
     <h1>LIFT LOG</h1>
-    <div class="hdr-btns">
-      <button class="hdr-btn" onclick="openView('tableView')">&#128203; Table</button>
-      <button class="hdr-btn" onclick="openView('progressView')">&#128200; Progress</button>
-      <button class="hdr-btn" onclick="openView('editView')">&#9998; Edit</button>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+      <div class="hdr-btns">
+        <button class="hdr-btn" onclick="openView('tableView')">&#128203; Table</button>
+        <button class="hdr-btn" onclick="openView('progressView')">&#128200; Progress</button>
+        <button class="hdr-btn" onclick="openView('editView')">&#9998; Edit</button>
+      </div>
+      <span id="syncStatus" style="font-size:.6rem;letter-spacing:.5px;transition:color .3s"></span>
     </div>
   </div>
   <div class="maxes-strip" id="maxesStrip"></div>
@@ -254,7 +257,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
   </div>
   <div class="data-section">
     <h4>Cross-Device Sync</h4>
-    <div class="data-note">Your data lives in this browser only. To use on another device: <strong>Export</strong> the file, save to Google Drive, open app on new device, then <strong>Import</strong>.</div>
+    <div class="data-note">Your data syncs automatically across all devices via the cloud. Export is available as a backup.</div>
     <div class="data-btns">
       <button class="data-btn" onclick="exportData()">Export Data</button>
       <button class="data-btn" onclick="document.getElementById('importFile').click()">Import Data</button>
@@ -348,10 +351,90 @@ var S = {
   progLift: 'Squat'
 };
 
-function save() {
-  try { localStorage.setItem('pl2025', JSON.stringify(S)); } catch(e) {}
+// ── SUPABASE CONFIG ──
+var SUPA_URL = 'https://pjurohuntyehfkbwbwtv.supabase.co';
+var SUPA_KEY = 'sb_publishable_iN5U1qtuEy08G7ZI4H-6sw_gXqFhT3g';
+
+var syncTimeout = null;
+var syncStatus = 'idle'; // idle | saving | saved | error
+
+function setSyncStatus(status) {
+  syncStatus = status;
+  var el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (status === 'saving') { el.textContent = '⟳ Saving...'; el.style.color = 'var(--muted)'; }
+  else if (status === 'saved') { el.textContent = '✓ Synced'; el.style.color = 'var(--green)'; }
+  else if (status === 'error') { el.textContent = '⚠ Offline — saved locally'; el.style.color = 'var(--red)'; }
+  else { el.textContent = ''; }
 }
+
+function save() {
+  // Always save locally first so nothing is lost
+  try { localStorage.setItem('pl2025', JSON.stringify(S)); } catch(e) {}
+  // Debounce cloud save — wait 800ms after last change
+  clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(function() { pushToSupabase(); }, 800);
+}
+
+function pushToSupabase() {
+  setSyncStatus('saving');
+  var body = JSON.stringify({ id: 'main', data: S, updated_at: new Date().toISOString() });
+  fetch(SUPA_URL + '/rest/v1/logs?id=eq.main', {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer ' + SUPA_KEY,
+      'Prefer': 'return=minimal'
+    },
+    body: body
+  }).then(function(r) {
+    if (r.ok) { setSyncStatus('saved'); setTimeout(function(){ setSyncStatus('idle'); }, 2000); }
+    else { setSyncStatus('error'); }
+  }).catch(function() { setSyncStatus('error'); });
+}
+
 function load() {
+  // Show loading state
+  document.getElementById('dayContent').innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:.85rem">Loading your data...</div>';
+  setSyncStatus('saving');
+
+  fetch(SUPA_URL + '/rest/v1/logs?id=eq.main&select=data', {
+    headers: {
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer ' + SUPA_KEY
+    }
+  }).then(function(r) { return r.json(); })
+  .then(function(rows) {
+    if (rows && rows.length > 0 && rows[0].data && Object.keys(rows[0].data).length > 0) {
+      var parsed = rows[0].data;
+      S.maxes = parsed.maxes || S.maxes;
+      S.program = parsed.program || S.program;
+      S.logs = parsed.logs || {};
+      S.doneDays = parsed.doneDays || {};
+      S.week = parsed.week || 1;
+      S.day = parsed.day || 1;
+      S.editDay = parsed.editDay || 1;
+      S.progLift = parsed.progLift || 'Squat';
+      // Also update local cache
+      try { localStorage.setItem('pl2025', JSON.stringify(S)); } catch(e) {}
+    } else {
+      // No cloud data yet — try local fallback
+      loadFromLocal();
+    }
+    setSyncStatus('saved');
+    setTimeout(function(){ setSyncStatus('idle'); }, 1500);
+    renderAll();
+  })
+  .catch(function() {
+    // Offline — fall back to localStorage
+    setSyncStatus('error');
+    loadFromLocal();
+    renderAll();
+  });
+}
+
+function loadFromLocal() {
   try {
     var d = localStorage.getItem('pl2025');
     if (d) {
@@ -926,7 +1009,7 @@ function renderAll() {
 }
 
 load();
-renderAll();
+// renderAll is called inside load() once data arrives
 </script>
 </body>
 </html>
