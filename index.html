@@ -8,8 +8,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Lift Log">
-<link rel="manifest" href="/liftlog/manifest.json">
-<title>Powerlifting Tracker</title>
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Lift Log&quot;,&quot;short_name&quot;:&quot;Lift Log&quot;,&quot;start_url&quot;:&quot;https://innitra-droid.github.io/liftlog/&quot;,&quot;scope&quot;:&quot;https://innitra-droid.github.io/liftlog/&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#0a0a0a&quot;,&quot;theme_color&quot;:&quot;#0a0a0a&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;https://innitra-droid.github.io/liftlog/icon-192.png&quot;,&quot;sizes&quot;:&quot;192x192&quot;,&quot;type&quot;:&quot;image/png&quot;},{&quot;src&quot;:&quot;https://innitra-droid.github.io/liftlog/icon-512.png&quot;,&quot;sizes&quot;:&quot;512x512&quot;,&quot;type&quot;:&quot;image/png&quot;}]}">
+<title>Lift Log</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0a0a0a;--surface:#141414;--card:#1c1c1c;--card2:#242424;--border:#2a2a2a;--accent:#c8ff00;--accent-dim:rgba(200,255,0,0.1);--red:#ff4d4d;--green:#00c96e;--muted:#555;--sub:#888;--text:#efefef}
@@ -430,13 +430,13 @@ function load() {
     }
     setSyncStatus('saved');
     setTimeout(function(){ setSyncStatus('idle'); }, 1500);
-    renderAll();
+    autoNavigate();
   })
   .catch(function() {
     // Offline — fall back to localStorage
     setSyncStatus('error');
     loadFromLocal();
-    renderAll();
+    autoNavigate();
   });
 }
 
@@ -1012,6 +1012,41 @@ function clearAllData() {
 
 function renderAll() {
   renderMaxes(); renderWeekBtns(); renderDayTabs(); renderDayContent();
+}
+
+function autoNavigate() {
+  // Find current week based on last completed day, then jump to next incomplete day
+  // First find the furthest week that has any data
+  var latestWeek = 1;
+  for (var w = 1; w <= 12; w++) {
+    if (S.logs[w] && Object.keys(S.logs[w]).length > 0) latestWeek = w;
+  }
+  // Also check doneDays
+  var doneKeys = Object.keys(S.doneDays);
+  for (var i = 0; i < doneKeys.length; i++) {
+    if (S.doneDays[doneKeys[i]]) {
+      var wk = parseInt(doneKeys[i].split('_')[0]);
+      if (wk > latestWeek) latestWeek = wk;
+    }
+  }
+  S.week = latestWeek;
+
+  // Within that week, find first incomplete non-rest day
+  for (var i = 0; i < S.program.length; i++) {
+    var d = S.program[i];
+    var key = S.week + '_' + d.day;
+    if (!S.doneDays[key]) {
+      S.day = d.day;
+      renderAll();
+      return;
+    }
+  }
+  // All days in this week done — move to next week
+  if (S.week < 12) {
+    S.week++;
+    S.day = S.program[0].day;
+  }
+  renderAll();
 }
 
 load();
